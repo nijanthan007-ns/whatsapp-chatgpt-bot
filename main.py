@@ -8,7 +8,7 @@ import asyncio
 # Your credentials
 ULTRAMSG_INSTANCE_ID = "instance133623"
 ULTRAMSG_TOKEN = "shnmtd393b5963kq"
-OPENAI_API_KEY = "sk-proj-..."  # Replace with your full key
+OPENAI_API_KEY = "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"  # Replace with your full key
 
 openai.api_key = OPENAI_API_KEY
 
