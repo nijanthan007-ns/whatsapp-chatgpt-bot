@@ -1,57 +1,68 @@
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
 import httpx
 import os
 import openai
+import asyncio
 
-app = FastAPI()
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
-ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
-ULTRAMSG_API_URL = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
+# Your credentials
+ULTRAMSG_INSTANCE_ID = "instance133623"
+ULTRAMSG_TOKEN = "shnmtd393b5963kq"
+OPENAI_API_KEY = "sk-proj-..."  # Replace with your full key
 
 openai.api_key = OPENAI_API_KEY
 
+app = FastAPI()
+
+class WebhookMessage(BaseModel):
+    event_type: str
+    instanceId: str
+    data: dict
+
 @app.get("/")
-def root():
-    return {"message": "✅ WhatsApp ChatGPT Bot is running."}
+async def root():
+    return {"status": "running"}
 
 @app.post("/webhook")
-async def whatsapp_webhook(req: Request):
-    body = await req.json()
-    print("\U0001F4E5 Incoming:", body)
+async def handle_webhook(msg: WebhookMessage):
+    if msg.event_type == "message_received":
+        user_message = msg.data.get("body")
+        sender_number = msg.data.get("from")
+        if not user_message or not sender_number:
+            return {"status": "ignored"}
 
-    try:
-        if body.get("event_type") == "message_received":
-            msg_data = body.get("data", {})
-            sender = msg_data.get("from")
-            message = msg_data.get("body")
+        print(f"📥 Incoming message from {sender_number}: {user_message}")
 
-            if sender and message:
-                response = await ask_openai(message)
-                await send_reply(sender, response)
+        # Step 1: Get response from OpenAI (New v1.0 syntax)
+        try:
+            response = await openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": user_message}
+                ]
+            )
+            reply = response.choices[0].message.content.strip()
+        except Exception as e:
+            print("❌ OpenAI Error:", e)
+            reply = "Sorry, something went wrong. Please try again later."
 
-    except Exception as e:
-        print("Error:", str(e))
+        # Step 2: Send reply back via UltraMsg
+        payload = {
+            "token": ULTRAMSG_TOKEN,
+            "to": sender_number,
+            "body": reply,
+            "priority": "10",
+            "referenceId": ""
+        }
 
-    return {"status": "ok"}
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat",
+                    data=payload
+                )
+        except Exception as e:
+            print("❌ UltraMsg Error:", e)
 
-async def ask_openai(prompt):
-    try:
-        res = await openai.ChatCompletion.acreate(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return res.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Error from OpenAI: {str(e)}"
-
-async def send_reply(to_number, message):
-    payload = {
-        "token": ULTRAMSG_TOKEN,
-        "to": to_number,
-        "body": message
-    }
-    async with httpx.AsyncClient() as client:
-        res = await client.post(ULTRAMSG_API_URL, data=payload)
-        print("\U0001F4E4 Sent:", res.json())
+    return {"status": "received"}
