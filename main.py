@@ -1,63 +1,40 @@
-import os
-import requests
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
 from openai import OpenAI
-from fastapi.responses import JSONResponse
+import requests
 
 app = FastAPI()
 
-# Your API keys
-OPENAI_API_KEY = "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"  # Replace with your actual key
-ULTRAMSG_INSTANCE_ID = "instance133623"
+# Directly include your OpenAI API key here
+client = OpenAI(api_key="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")
+
+ULTRAMSG_URL = "https://api.ultramsg.com/instance133623/messages/chat"
 ULTRAMSG_TOKEN = "shnmtd393b5963kq"
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Ultramsg API endpoint
-def send_whatsapp_message(to, message):
-    url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
-    payload = {
-        "token": ULTRAMSG_TOKEN,
-        "to": to,
-        "body": message
-    }
-    response = requests.post(url, data=payload)
-    print("📤 Sent:", response.text)
-    return response.status_code == 200
-
 @app.get("/")
-def home():
-    return {"status": "Bot is running 🚀"}
+def root():
+    return {"status": "working"}
 
 @app.post("/webhook")
-async def webhook(request: Request):
+async def receive_message(request: Request):
+    data = await request.json()
+    message = data['data']['body']
+    sender = data['data']['from']
+
     try:
-        payload = await request.json()
-        print("📥 Incoming message:", payload)
-
-        # Extract sender and message
-        message_data = payload.get("data", {})
-        sender = message_data.get("from", "")
-        message_body = message_data.get("body", "")
-
-        if not sender or not message_body:
-            return JSONResponse(content={"status": "ignored"}, status_code=200)
-
-        # Generate OpenAI response
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "user", "content": message_body}
-            ]
+            messages=[{"role": "user", "content": message}]
         )
-        reply = response.choices[0].message.content.strip()
-
-        # Send reply back to user
-        send_whatsapp_message(sender, reply)
-
+        reply = response.choices[0].message.content
     except Exception as e:
-        print("❌ Error:", str(e))
+        print("❌ OpenAI Error:", str(e))
+        reply = "⚠️ Sorry, I couldn't process that."
 
-    return JSONResponse(content={"status": "ok"}, status_code=200)
+    payload = {
+        "token": ULTRAMSG_TOKEN,
+        "to": sender,
+        "body": reply
+    }
+
+    requests.post(ULTRAMSG_URL, data=payload)
+    return {"success": True}
