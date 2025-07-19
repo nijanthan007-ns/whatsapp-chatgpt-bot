@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 app = FastAPI()
 
 # Your API keys
-OPENAI_API_KEY = "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"  # Replace with your actual key
+OPENAI_API_KEY = "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"  # Replace with your actual key
 ULTRAMSG_INSTANCE_ID = "instance133623"
 ULTRAMSG_TOKEN = "shnmtd393b5963kq"
 
