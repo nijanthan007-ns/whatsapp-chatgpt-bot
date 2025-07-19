@@ -1,68 +1,63 @@
+import os
+import requests
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-import httpx
-import os
-import openai
-import asyncio
-
-# Your credentials
-ULTRAMSG_INSTANCE_ID = "instance133623"
-ULTRAMSG_TOKEN = "shnmtd393b5963kq"
-OPENAI_API_KEY = "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"  # Replace with your full key
-
-openai.api_key = OPENAI_API_KEY
+from openai import OpenAI
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
-class WebhookMessage(BaseModel):
-    event_type: str
-    instanceId: str
-    data: dict
+# Your API keys
+OPENAI_API_KEY = "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"  # Replace with your actual key
+ULTRAMSG_INSTANCE_ID = "instance133623"
+ULTRAMSG_TOKEN = "shnmtd393b5963kq"
+
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Ultramsg API endpoint
+def send_whatsapp_message(to, message):
+    url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
+    payload = {
+        "token": ULTRAMSG_TOKEN,
+        "to": to,
+        "body": message
+    }
+    response = requests.post(url, data=payload)
+    print("📤 Sent:", response.text)
+    return response.status_code == 200
 
 @app.get("/")
-async def root():
-    return {"status": "running"}
+def home():
+    return {"status": "Bot is running 🚀"}
 
 @app.post("/webhook")
-async def handle_webhook(msg: WebhookMessage):
-    if msg.event_type == "message_received":
-        user_message = msg.data.get("body")
-        sender_number = msg.data.get("from")
-        if not user_message or not sender_number:
-            return {"status": "ignored"}
+async def webhook(request: Request):
+    try:
+        payload = await request.json()
+        print("📥 Incoming message:", payload)
 
-        print(f"📥 Incoming message from {sender_number}: {user_message}")
+        # Extract sender and message
+        message_data = payload.get("data", {})
+        sender = message_data.get("from", "")
+        message_body = message_data.get("body", "")
 
-        # Step 1: Get response from OpenAI (New v1.0 syntax)
-        try:
-            response = await openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": user_message}
-                ]
-            )
-            reply = response.choices[0].message.content.strip()
-        except Exception as e:
-            print("❌ OpenAI Error:", e)
-            reply = "Sorry, something went wrong. Please try again later."
+        if not sender or not message_body:
+            return JSONResponse(content={"status": "ignored"}, status_code=200)
 
-        # Step 2: Send reply back via UltraMsg
-        payload = {
-            "token": ULTRAMSG_TOKEN,
-            "to": sender_number,
-            "body": reply,
-            "priority": "10",
-            "referenceId": ""
-        }
+        # Generate OpenAI response
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "user", "content": message_body}
+            ]
+        )
+        reply = response.choices[0].message.content.strip()
 
-        try:
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat",
-                    data=payload
-                )
-        except Exception as e:
-            print("❌ UltraMsg Error:", e)
+        # Send reply back to user
+        send_whatsapp_message(sender, reply)
 
-    return {"status": "received"}
+    except Exception as e:
+        print("❌ Error:", str(e))
+
+    return JSONResponse(content={"status": "ok"}, status_code=200)
