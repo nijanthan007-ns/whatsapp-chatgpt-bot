@@ -1,48 +1,74 @@
 import os
+import openai
 import requests
 from fastapi import FastAPI, Request
-import openai
-from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()  # Load environment variables
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# ✅ Load environment variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
 ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
 
-app = FastAPI()
+# ✅ Init OpenAI client
+openai.api_key = OPENAI_API_KEY
 
-def send_whatsapp_message(to: str, text: str):
+# ✅ Init FastAPI app
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ✅ Function to get ChatGPT reply
+def get_openai_response(message):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # or "gpt-4" if your key supports it
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": message},
+            ],
+            max_tokens=1000,
+            temperature=0.7,
+        )
+        return response['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        print("OpenAI error:", e)
+        return "Sorry, something went wrong while generating a reply."
+
+# ✅ Function to send WhatsApp message via UltraMsg
+def send_message(to, message):
     url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
     payload = {
         "token": ULTRAMSG_TOKEN,
         "to": to,
-        "body": text
+        "body": message,
     }
-    requests.post(url, data=payload)
-
-def get_ai_reply(prompt: str) -> str:
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
+        response = requests.post(url, data=payload)
+        print("UltraMsg send response:", response.text)
     except Exception as e:
-        print("OpenAI error:", e)
-        return "I'm having trouble right now. Please try again later."
+        print("UltraMsg send error:", e)
 
+# ✅ Webhook endpoint
 @app.post("/webhook")
-async def receive_message(request: Request):
+async def webhook(request: Request):
     data = await request.json()
-    if "body" in data and "from" in data:
-        user_message = data["body"]
-        user_number = data["from"].replace("whatsapp:", "")
-        ai_reply = get_ai_reply(user_message)
-        send_whatsapp_message(user_number, ai_reply)
-    return {"success": True}
+    print("📥 Incoming:", data)
 
-@app.get("/")
-def root():
-    return {"message": "WhatsApp AI Chatbot is running"}
+    # Check if message has text
+    if 'body' not in data or 'from' not in data:
+        return {"success": False}
+
+    sender = data['from']
+    message = data['body']
+
+    # Get response from ChatGPT
+    reply = get_openai_response(message)
+
+    # Send reply back to sender
+    send_message(sender, reply)
+
+    return {"success": True}
