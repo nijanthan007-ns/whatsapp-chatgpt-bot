@@ -1,74 +1,64 @@
 import os
-import openai
 import requests
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from openai import OpenAI
+from dotenv import load_dotenv
 
-# ✅ Load environment variables
+load_dotenv()
+
+app = FastAPI()
+
+# Get credentials from environment
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ULTRAMSG_INSTANCE_ID = os.getenv("ULTRAMSG_INSTANCE_ID")
 ULTRAMSG_TOKEN = os.getenv("ULTRAMSG_TOKEN")
 
-# ✅ Init OpenAI client
-openai.api_key = OPENAI_API_KEY
+# Initialize OpenAI
+openai = OpenAI(api_key=OPENAI_API_KEY)
 
-# ✅ Init FastAPI app
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.get("/")
+async def root():
+    return {"message": "WhatsApp ChatGPT Bot is Live!"}
 
-# ✅ Function to get ChatGPT reply
-def get_openai_response(message):
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # or "gpt-4" if your key supports it
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": message},
-            ],
-            max_tokens=1000,
-            temperature=0.7,
-        )
-        return response['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        print("OpenAI error:", e)
-        return "Sorry, something went wrong while generating a reply."
-
-# ✅ Function to send WhatsApp message via UltraMsg
-def send_message(to, message):
-    url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
-    payload = {
-        "token": ULTRAMSG_TOKEN,
-        "to": to,
-        "body": message,
-    }
-    try:
-        response = requests.post(url, data=payload)
-        print("UltraMsg send response:", response.text)
-    except Exception as e:
-        print("UltraMsg send error:", e)
-
-# ✅ Webhook endpoint
 @app.post("/webhook")
-async def webhook(request: Request):
-    data = await request.json()
-    print("📥 Incoming:", data)
+async def receive_message(request: Request):
+    payload = await request.json()
+    print("📥 Incoming:", payload)
 
-    # Check if message has text
-    if 'body' not in data or 'from' not in data:
-        return {"success": False}
+    try:
+        if payload["event_type"] == "message_received":
+            message_data = payload["data"]
+            sender = message_data.get("from")
+            message = message_data.get("body")
 
-    sender = data['from']
-    message = data['body']
+            if not sender or not message:
+                return JSONResponse(content={"error": "Missing sender or message"}, status_code=400)
 
-    # Get response from ChatGPT
-    reply = get_openai_response(message)
+            print(f"💬 Message from {sender}: {message}")
 
-    # Send reply back to sender
-    send_message(sender, reply)
+            # Generate reply using OpenAI
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": message}]
+            )
 
-    return {"success": True}
+            reply = response.choices[0].message.content.strip()
+            print("🤖 Reply:", reply)
+
+            # Send reply using UltraMsg API
+            send_url = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
+            send_payload = {
+                "token": ULTRAMSG_TOKEN,
+                "to": sender,
+                "body": reply
+            }
+
+            send_response = requests.post(send_url, data=send_payload)
+            print("📤 Sent message:", send_response.text)
+
+        return {"success": True}
+
+    except Exception as e:
+        print("❌ Error:", e)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
