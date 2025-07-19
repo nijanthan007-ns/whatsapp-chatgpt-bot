@@ -1,4 +1,4 @@
 fastapi
-httpx
 uvicorn
+requests
 openai>=1.0.0
