@@ -9,7 +9,7 @@ ULTRAMSG_TOKEN = "shnmtd393b5963kq"
 ULTRAMSG_URL = f"https://api.ultramsg.com/{ULTRAMSG_INSTANCE_ID}/messages/chat"
 
 # ==== HARDCODED OPENAI KEY ====
-client = OpenAI(api_key="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")
+client = OpenAI(api_key="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")
 
 # ==== FASTAPI SETUP ====
 app = FastAPI()
